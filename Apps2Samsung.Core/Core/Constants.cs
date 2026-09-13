@@ -111,8 +111,8 @@ namespace Apps2Samsung.Helpers.Core
         public static class Api
         {
             public const string UserAgent = "SamsungJellyfinInstaller/1.0";
-            public const string MediaBrowserAuthHeader = "MediaBrowser Token=\"{0}\"";
-            public const string EmbyAuthHeader = "MediaBrowser Client=\"Samsung Jellyfin Installer\", Device=\"PC\", DeviceId=\"samsungjellyfin\", Version=\"1.0.0\"";
+            public const string MediaBrowserAuthHeader = "MediaBrowser Client=\"Apps2Samsung\", " + "Device=\"Samsung TV\", " + "DeviceId=\"apps2samsung\", " + "Version=\"1.0.0\", " + "Token=\"{0}\"";
+            public const string MediaBrowserAuthHeaderUnauthenticated = "MediaBrowser Client=\"Apps2Samsung\", " + "Device=\"Samsung TV\", " + "DeviceId=\"apps2samsung\", " + "Version=\"1.0.0\"";
             public const string JsonContentType = "application/json";
         }
 
