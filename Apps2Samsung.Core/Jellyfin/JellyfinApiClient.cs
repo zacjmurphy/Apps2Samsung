@@ -153,7 +153,17 @@ namespace Apps2Samsung.Helpers.API
                     return (accessToken, userId, isAdmin, null);
                 }
 
-                Trace.WriteLine("$[Auth] Authentication failed: {response.StatusCode} - {responseJson}");
+                if (!response.IsSuccessStatusCode) {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+
+                    Trace.WriteLine($"[Auth] Authentication failed.");
+                    Trace.WriteLine($"[Auth] Status: {(int)response.StatusCode} {response.StatusCode}");
+                    Trace.WriteLine($"[Auth] Response: {errorContent}");
+
+                    return (null, null, false, $"Authentication failed: {(int)response.StatusCode} {response.StatusCode}");
+                }
+
+                Trace.WriteLine($"[Auth] Authentication failed: {response.StatusCode} - {responseJson}");
                 return (null, null, false, $"Authentication failed: {response.StatusCode}");
             }
             catch (Exception ex)
