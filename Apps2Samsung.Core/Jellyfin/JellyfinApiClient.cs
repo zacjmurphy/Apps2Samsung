@@ -106,12 +106,10 @@ namespace Apps2Samsung.Helpers.API
         /// Sets up HTTP headers for authenticated Jellyfin API requests.
         /// Uses the AccessToken obtained from username/password authentication.
         /// </summary>
-        private void SetupHeaders(string accessToken)
-        {
+        private void SetupHeaders(string accessToken) {
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(Constants.Api.UserAgent);
-            _httpClient.DefaultRequestHeaders.Add("Authorization",
-                string.Format(Constants.Api.MediaBrowserAuthHeader, accessToken));
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", string.Format(Constants.Api.MediaBrowserAuthHeader, accessToken));
         }
 
         /// <summary>
@@ -119,56 +117,46 @@ namespace Apps2Samsung.Helpers.API
         /// Returns the access token, user ID, and admin status on success.
         /// </summary>
         public async Task<(string? accessToken, string? userId, bool isAdmin, string? error)> AuthenticateAsync(string serverUrl, string username, string password) {
-            try
-            {
+            try {
                 serverUrl = UrlHelper.NormalizeServerUrl(serverUrl);
                 var authUrl = $"{serverUrl}/Users/AuthenticateByName";
 
                 _httpClient.DefaultRequestHeaders.Clear();
                 _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(Constants.Api.UserAgent);
+                _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", Constants.Api.MediaBrowserAuthHeaderUnauthenticated);
 
-                // Jellyfin 12 uses the standard Authorization header
-                _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", Constants.Api.MediaBrowserAuthHeader);
                 var authPayload = new { Username = username, Pw = password };
-
                 var json = JsonSerializer.Serialize(authPayload);
-                using var content = new StringContent(json, Encoding.UTF8, Constants.Api.JsonContentType);
 
+                using var content = new StringContent(json, Encoding.UTF8, Constants.Api.JsonContentType);
                 Trace.WriteLine($"[Auth] Authenticating user '{username}' at {authUrl}");
+
                 var response = await _httpClient.PostAsync(authUrl, content);
                 var responseJson = await response.Content.ReadAsStringAsync();
-
-                if (response.IsSuccessStatusCode) {
-                    var authResponse = JsonNode.Parse(responseJson);
-                    var accessToken = authResponse?["AccessToken"]?.GetValue<string>();
-                    var userId = authResponse?["User"]?["Id"]?.GetValue<string>();
-                    var isAdmin = authResponse?["User"]?["Policy"]?["IsAdministrator"]?.GetValue<bool>() ?? false;
-
-                    if (string.IsNullOrEmpty(accessToken) || string.IsNullOrEmpty(userId)) {
-                        Trace.WriteLine("[Auth] Authentication succeeded but no AccessToken/UserId was returned.");
-                        return (null, null, false, "Authentication succeeded but Jellyfin did not return an access token or user ID.");
-                    }
-
-                    Trace.WriteLine($"[Auth] User Authenticated. UserId: {userId}, isAdmin: {isAdmin}");
-                    return (accessToken, userId, isAdmin, null);
-                }
+                Trace.WriteLine($"[Auth] HTTP {(int)response.StatusCode} {response.StatusCode}");
 
                 if (!response.IsSuccessStatusCode) {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-
-                    Trace.WriteLine($"[Auth] Authentication failed.");
-                    Trace.WriteLine($"[Auth] Status: {(int)response.StatusCode} {response.StatusCode}");
-                    Trace.WriteLine($"[Auth] Response: {errorContent}");
-
+                    Trace.WriteLine($"[Auth] Response: {responseJson}");
                     return (null, null, false, $"Authentication failed: {(int)response.StatusCode} {response.StatusCode}");
                 }
 
-                Trace.WriteLine($"[Auth] Authentication failed: {response.StatusCode} - {responseJson}");
-                return (null, null, false, $"Authentication failed: {response.StatusCode}");
-            }
-            catch (Exception ex)
-            {
-                Trace.WriteLine($"[Auth] Authentication error: {ex}");
+                var authResponse = JsonNode.Parse(responseJson);
+                var accessToken = authResponse?["AccessToken"]?.GetValue<string>();
+                var userId = authResponse?["User"]?["Id"]?.GetValue<string>();
+                var isAdmin = authResponse?["User"]?["Policy"]?["IsAdministrator"]?.GetValue<bool>() ?? false;
+                Trace.WriteLine($"[Auth] Authentication successful. " + $"UserId={userId}, IsAdmin={isAdmin}, " + $"HasToken={!string.IsNullOrEmpty(accessToken)}");
+
+                if (string.IsNullOrEmpty(accessToken)) {
+                    return (null, userId, isAdmin, "Jellyfin authenticated the user but did not return an access token.");
+                }
+
+                if (string.IsNullOrEmpty(userId)) {
+                    return (accessToken, null, isAdmin, "Jellyfin authenticated the user but did not return a user ID.");
+                }
+
+                return (accessToken, userId, isAdmin, null);
+            } catch (Exception ex) {
+                Trace.WriteLine($"[Auth] Authentication exception: {ex}");
                 return (null, null, false, ex.Message);
             }
         }

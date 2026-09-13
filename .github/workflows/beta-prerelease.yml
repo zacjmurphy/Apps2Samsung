@@ -120,26 +120,12 @@ jobs:
             echo ""
             echo "| Platform | Status | Notes |"
             echo "|----------|--------|-------|"
-            echo "| 🍎 macOS (.app + dmg) | ⚠️ Beta | ARM64 + Intel |"
-            echo "| 🍎 macOS (CLI) | ⚠️ Beta | Per-arch tar.gz |"
-            echo "| 🐧 Linux | ⚠️ Beta | x64 + ARM64 (tar.gz / .deb) |"
-            echo "| 🪟 Windows | ⚠️ Beta | CI-built |"
-            echo "| 🤖 Android (.apk) | ⚠️ Beta | Sideload; phone as installer head |"
+            echo "| 🍎 macOS (.app + dmg) | ⚠️ Beta | ARM64 |"
           } > RELEASE_NOTES.md
 
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-
-      # ---------------- WINDOWS ----------------
-      - name: Build Windows
-        run: |
-          dotnet publish Jellyfin2Samsung-CrossOS/Apps2Samsung.csproj \
-            -c Release -r win-x64 -p:SelfContained=true \
-            -o publish/win-x64
-
-          mkdir -p dist
-          (cd publish/win-x64 && zip -r "../../dist/${PRODUCT_NAME}-${VERSION_TAG}-win-x64.zip" .)
 
       # ---------------- RELEASE (UPDATE SAME TAG EVERY COMMIT) ----------------
       - uses: softprops/action-gh-release@v3
@@ -245,56 +231,6 @@ jobs:
             -srcfolder dmg-arm64 \
             -format UDZO \
             dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-macos-arm64.dmg
-
-      # ---------------- INTEL ----------------
-      - name: macOS Intel publish
-        run: |
-          dotnet publish Jellyfin2Samsung-CrossOS/Apps2Samsung.csproj \
-            -c Release -r osx-x64 -p:SelfContained=true \
-            -o publish/osx-x64
-
-          tar -czf \
-            dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-macos-x64.tar.gz \
-            -C publish/osx-x64 .
-
-          APP=Apps2Samsung-x64.app/Contents
-          mkdir -p $APP/MacOS $APP/Resources
-          cp -R publish/osx-x64/* $APP/MacOS/
-          chmod +x $APP/MacOS/Apps2Samsung
-          cp jellyfin.icns $APP/Resources/
-
-          cat > $APP/Info.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleName</key><string>Apps2Samsung</string>
-            <key>CFBundleExecutable</key><string>Apps2Samsung</string>
-            <key>CFBundleIdentifier</key><string>org.madebypatrick.apps2samsung</string>
-            <key>CFBundleVersion</key><string>${{ needs.beta-release.outputs.VERSION }}</string>
-            <key>CFBundleShortVersionString</key><string>${{ needs.beta-release.outputs.VERSION }}</string>
-            <key>CFBundlePackageType</key><string>APPL</string>
-            <key>LSMinimumSystemVersion</key><string>11.0</string>
-          
-            <key>NSLocalNetworkUsageDescription</key>
-            <string>Apps2Samsung scans your local network to find Samsung TVs in Developer Mode.</string>
-            <key>CFBundleIconFile</key><string>jellyfin.icns</string>
-          </dict>
-          </plist>
-          EOF
-
-          codesign --deep --force --sign - Apps2Samsung-x64.app
-
-          rm -rf dmg-x64
-          mkdir -p dmg-x64
-          cp -R Apps2Samsung-x64.app dmg-x64/Apps2Samsung.app
-          ln -s /Applications dmg-x64/Applications
-          hdiutil create \
-            -volname Apps2Samsung \
-            -srcfolder dmg-x64 \
-            -format UDZO \
-            dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-macos-x64.dmg
 
       - uses: softprops/action-gh-release@v3
         with:
