@@ -5,12 +5,11 @@ on:
     branches: [beta]
     paths-ignore:
       - 'README.md'
-      - 'docs/**'      # website (GitHub Pages) — deploys on its own, shouldn't trigger an app release
-      - '.github/**'   # workflow / repo-meta changes shouldn't trigger an app release
-      - 'fastlane/**'  # store-listing metadata (F-Droid/IzzyOnDroid) — not app code
-      - 'crowdin.yml'  # translation sync config — changing it ships nothing, but the build it fired
-                       # overwrote the curated release notes, which then had to be re-applied
-  # Allow running the beta release manually (e.g. when a merge didn't fire the push trigger).
+      - 'docs/**'       # website (GitHub Pages) — deploys on its own, shouldn't trigger an app release
+      - '.github/**'    # workflow / repo-meta changes shouldn't trigger an app release
+      - 'fastlane/**'   # store-listing metadata (F-Droid/IzzyOnDroid) — not app code
+      - 'crowdin.yml'   # translation sync config — changing it ships nothing, but the build it fired
+                        # overwrote the curated release notes, which then had to be re-applied
   workflow_dispatch:
 
 permissions:
@@ -39,7 +38,7 @@ jobs:
           fetch-depth: 0
 
       # ---------------- VERSION ----------------
-      - name: Extract version
+      - name: Extract Version
         shell: bash
         run: |
           VERSION=$(grep -oE 'v[0-9]+(\.[0-9]+){1,3}' \
@@ -61,14 +60,14 @@ jobs:
       # The branch keeps a clean version (the Stable Release workflow rejects a "-beta" one), so
       # CI adds the marker here — in the build tree only, never committed — and a beta build
       # reports itself as "v2.7.9-beta" instead of claiming to be the stable v2.7.9.
-      - name: Stamp beta version
+      - name: Stamp Beta Version
         shell: bash
         run: python3 .github/scripts/stamp-beta-version.py
 
       # ---------------- RELEASE NOTES ----------------
       # PR-based notes via GitHub's generate-notes API (categorised by
       # .github/release.yml) instead of a raw `git log` dump.
-      - name: Generate changelog
+      - name: Generate Changelog
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -97,7 +96,7 @@ jobs:
               | grep -iv '\[skip ci\]' | awk '!seen[$0]++' >> CHANGELOG.md
           fi
 
-      - name: Prepare release notes
+      - name: Prepare Release Notes
         shell: bash
         run: |
           DATE=$(date +'%Y-%m-%d')
@@ -120,12 +119,53 @@ jobs:
             echo ""
             echo "| Platform | Status | Notes |"
             echo "|----------|--------|-------|"
-            echo "| 🍎 macOS (.app + dmg) | ⚠️ Beta | ARM64 |"
+            echo "| 🍎 macOS (.app + dmg) | ⚠️ Beta | ARM64 + Intel |"
+            echo "| 🍎 macOS (CLI) | ⚠️ Beta | Per-arch tar.gz |"
+            echo "| 🐧 Linux | ⚠️ Beta | x64 + ARM64 (tar.gz / .deb) |"
+            echo "| 🪟 Windows | ⚠️ Beta | CI-built |"
           } > RELEASE_NOTES.md
 
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
+
+      # ---------------- WINDOWS ----------------
+      - name: Build Windows
+        run: |
+          dotnet publish Jellyfin2Samsung-CrossOS/Apps2Samsung.csproj \
+            -c Release -r win-x64 -p:SelfContained=true \
+            -o publish/win-x64
+
+          mkdir -p dist
+          (cd publish/win-x64 && zip -r "../../dist/${PRODUCT_NAME}-${VERSION_TAG}-win-x64.zip" .)
+
+      # ---------------- LINUX (x64 + arm64) ----------------
+      - name: Build Linux
+        run: |
+          for ARCH in x64 arm64; do
+            dotnet publish Jellyfin2Samsung-CrossOS/Apps2Samsung.csproj \
+              -c Release -r linux-$ARCH -p:SelfContained=true \
+              -o publish/linux-$ARCH
+          done
+
+      # ---------------- LINUX PACKAGES (tar.gz + deb + rpm + AppImage, x64 + arm64) ----------------
+      # One script for all of them, shared with the stable release and with the PR check that proves
+      # it still builds — see .github/scripts/package-linux.sh (#589).
+      - name: Linux Packaging Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin dpkg-dev rpm
+          rsvg-convert -w 256 -h 256 jellyfin-tizen-logo.svg -o jellyfin.png
+          curl -fsSL -o /usr/local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo chmod +x /usr/local/bin/appimagetool
+
+      - name: Build Linux Packages
+        run: |
+          for ARCH in x64 arm64; do
+            bash .github/scripts/package-linux.sh \
+              "publish/linux-$ARCH" "$ARCH" "$VERSION" "$VERSION_TAG" dist jellyfin.png
+          done
 
       # ---------------- RELEASE (UPDATE SAME TAG EVERY COMMIT) ----------------
       - uses: softprops/action-gh-release@v3
@@ -149,7 +189,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # Fresh checkout — stamp the beta marker again (see the beta-release job).
-      - name: Stamp beta version
+      - name: Stamp Beta Version
         shell: bash
         run: python3 .github/scripts/stamp-beta-version.py
 
@@ -159,7 +199,7 @@ jobs:
 
       # ---------------- ICON ----------------
       # ---------------- ICON ----------------
-      - name: macOS icon (SVG -> ICNS)
+      - name: MacOS Icon (SVG -> ICNS)
         run: |
           # Reliable SVG -> PNG conversion on GitHub macOS runners
           brew install librsvg
@@ -167,7 +207,7 @@ jobs:
           # If the SVG is already in your repo, keep this as-is.
           # If not, uncomment the curl line below and remove the local reference.
           # curl -fsSL \
-          #   https://raw.githubusercontent.com/Apps2Samsung/Samsung-Jellyfin-Installer/refs/heads/master/jellyfin-tizen-logo.svg \
+          #   https://raw.githubusercontent.com/zacjmurphy/Apps2Samsung/refs/heads/beta/jellyfin-tizen-logo.svg \
           #   -o jellyfin-tizen-logo.svg
 
           rsvg-convert -w 1024 -h 1024 jellyfin-tizen-logo.svg -o jellyfin.png
@@ -182,7 +222,7 @@ jobs:
           iconutil -c icns icon.iconset -o jellyfin.icns
 
       # ---------------- ARM64 ----------------
-      - name: macOS ARM64 publish
+      - name: MacOS ARM64 Publish
         run: |
           dotnet publish Jellyfin2Samsung-CrossOS/Apps2Samsung.csproj \
             -c Release -r osx-arm64 -p:SelfContained=true \
@@ -232,6 +272,57 @@ jobs:
             -format UDZO \
             dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-macos-arm64.dmg
 
+      # ---------------- INTEL ----------------
+      - name: MacOS Intel Publish
+        run: |
+          dotnet publish Jellyfin2Samsung-CrossOS/Apps2Samsung.csproj \
+            -c Release -r osx-x64 -p:SelfContained=true \
+            -o publish/osx-x64
+
+          tar -czf \
+            dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-macos-x64.tar.gz \
+            -C publish/osx-x64 .
+
+          APP=Apps2Samsung-x64.app/Contents
+          mkdir -p $APP/MacOS $APP/Resources
+          cp -R publish/osx-x64/* $APP/MacOS/
+          chmod +x $APP/MacOS/Apps2Samsung
+          cp jellyfin.icns $APP/Resources/
+
+          cat > $APP/Info.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Apps2Samsung</string>
+            <key>CFBundleExecutable</key><string>Apps2Samsung</string>
+            <key>CFBundleIdentifier</key><string>org.madebypatrick.apps2samsung</string>
+            <key>CFBundleVersion</key><string>${{ needs.beta-release.outputs.VERSION }}</string>
+            <key>CFBundleShortVersionString</key><string>${{ needs.beta-release.outputs.VERSION }}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+          
+            <key>NSLocalNetworkUsageDescription</key>
+            <string>Apps2Samsung scans your local network to find Samsung TVs in Developer Mode.</string>
+            <key>CFBundleIconFile</key><string>jellyfin.icns</string>
+          </dict>
+          </plist>
+          EOF
+
+          codesign --deep --force --sign - Apps2Samsung-x64.app
+
+          rm -rf dmg-x64
+          mkdir -p dmg-x64
+          cp -R Apps2Samsung-x64.app dmg-x64/Apps2Samsung.app
+          ln -s /Applications dmg-x64/Applications
+          hdiutil create \
+            -volname Apps2Samsung \
+            -srcfolder dmg-x64 \
+            -format UDZO \
+            dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-macos-x64.dmg
+
+      # ---------------- RELEASE (UPDATE SAME TAG EVERY COMMIT) ----------------
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.beta-release.outputs.VERSION_TAG }}
@@ -239,3 +330,110 @@ jobs:
           prerelease: true
           overwrite_files: true
           files: dist/*
+
+# ======================================================
+# ANDROID (.apk — the mobile installer head)
+# ======================================================
+  # android-apk:
+  #   runs-on: ubuntu-latest
+  #   # Serialize the release-asset uploads: run after macos-app so the two jobs don't
+  #   # delete+overwrite the same release concurrently (which triggered GitHub 5xx "Server
+  #   # Error"s). Still runs even if macos-app fails, as long as the release itself was created.
+  #   needs: [beta-release, macos-app]
+  #   if: ${{ always() && needs.beta-release.result == 'success' }}
+
+  #   steps:
+  #     - uses: actions/checkout@v7
+
+  #     # ---------------- ANDROID versionCode ----------------
+  #     # One past the highest versionCode published on either channel, so both
+  #     # channels stay strictly increasing and beta <-> stable can always update in
+  #     # place. See the header of .github/scripts/android-version-code.sh for why the
+  #     # old github.run_number could (and did) go backwards.
+  #     #
+  #     # Runs before the build so a bad code fails in seconds instead of after a
+  #     # ten-minute publish.
+  #     - name: Compute Android Version Code
+  #       shell: bash
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: .github/scripts/android-version-code.sh compute beta
+
+  #     # Fresh checkout — stamp the beta marker again (see the beta-release job). The APK's own
+  #     # versionName comes from the -p:ApplicationDisplayVersion below, not from this file.
+  #     - name: Stamp Beta Version
+  #       shell: bash
+  #       run: python3 .github/scripts/stamp-beta-version.py
+
+  #     - uses: actions/setup-dotnet@v6
+  #       with:
+  #         dotnet-version: 10.0.x
+
+  #     - uses: actions/setup-java@v6
+  #       with:
+  #         distribution: temurin
+  #         java-version: '17'
+
+  #     - name: Install MAUI Android Workload
+  #       run: dotnet workload install maui-android
+
+  #     # The persistent signing key is required. The old fallback minted a throwaway
+  #     # key, which produces an APK that installs but can never update in place —
+  #     # Android rejects a signing-key change — so it is the same "users are stuck"
+  #     # failure as a versionCode downgrade, just with a different dialog.
+  #     - name: Prepare Android Signing Key
+  #       run: |
+  #         set -euo pipefail
+  #         if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+  #           echo "::error::ANDROID_KEYSTORE_BASE64 is not set. An APK signed with a throwaway key cannot update existing installs — set ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS."
+  #           exit 1
+  #         fi
+  #         echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$PWD/a2s.keystore"
+  #         echo "KS_PASS=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+  #         echo "KS_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
+  #         echo "Using signing key from repo secrets."
+
+  #     - name: Build APK
+  #       run: |
+  #         dotnet publish Apps2Samsung.Mobile/Apps2Samsung.Mobile.csproj \
+  #           -c Release -f net10.0-android \
+  #           -p:ApplicationDisplayVersion=${{ needs.beta-release.outputs.VERSION_BETA }} \
+  #           -p:ApplicationVersion="$ANDROID_VERSION_CODE" \
+  #           -p:AndroidKeyStore=true \
+  #           -p:AndroidSigningKeyStore="$PWD/a2s.keystore" \
+  #           -p:AndroidSigningKeyAlias="$KS_ALIAS" \
+  #           -p:AndroidSigningStorePass="$KS_PASS" \
+  #           -p:AndroidSigningKeyPass="$KS_PASS" \
+  #           -o publish/android
+
+  #         mkdir -p dist
+  #         APK=$(ls publish/android/*-Signed.apk 2>/dev/null | head -n1)
+  #         [ -z "$APK" ] && APK=$(ls publish/android/*.apk 2>/dev/null | head -n1)
+  #         if [ -z "$APK" ]; then
+  #           echo "❌ No APK produced"; exit 1
+  #         fi
+  #         cp "$APK" "dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-android.apk"
+
+  #     # The -p: property above is only a request: prove the APK really carries the
+  #     # code we computed, so an MSBuild or .csproj change can never quietly ship a
+  #     # different one. Also logs the signing certificate.
+  #     - name: Verify APK Version Code & Signer
+  #       shell: bash
+  #       env:
+  #         # SHA-256 of the release signing certificate (CN=Apps2Samsung, O=MadeByPatrick),
+  #         # taken from the published APKs. Android refuses an update signed by a different
+  #         # key just as hard as a versionCode downgrade, so this must never change — if
+  #         # this step fails, the ANDROID_KEYSTORE_* secrets were swapped, and the fix is to
+  #         # restore the original keystore, not to update this value.
+  #         EXPECTED_SIGNER_SHA256: bd4dee21ebeee1b0b690c612318808d27f35c46fa53ba31d256379a7fed7e107
+  #       run: |
+  #         .github/scripts/android-version-code.sh verify \
+  #           "dist/${PRODUCT_NAME}-${{ needs.beta-release.outputs.VERSION_TAG }}-android.apk"
+
+  #     - uses: softprops/action-gh-release@v3
+  #       with:
+  #         tag_name: ${{ needs.beta-release.outputs.VERSION_TAG }}
+  #         name: ${{ needs.beta-release.outputs.VERSION_TAG }}
+  #         prerelease: true
+  #         overwrite_files: true
+  #         files: dist/*
